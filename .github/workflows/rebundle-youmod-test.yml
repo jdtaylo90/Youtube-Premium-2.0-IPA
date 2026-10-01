@@ -1,0 +1,35 @@
+name: Make YouMod Test IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rebundle:
+    name: Rebundle YouMod 2.0 for side-by-side install
+    runs-on: macos-latest
+
+    steps:
+      - name: Download YouMod 2.0 IPA
+        run: |
+          curl -L --fail --retry 3 \
+            -o YouMod-original.ipa \
+            "https://github.com/shreybaviskar/Youtube-Premium-2.0-IPA/releases/download/youmod-ipa21/YouMod_21.37.4_v2.0.0.ipa"
+
+      - name: Install cyan
+        run: |
+          pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+
+      - name: Change app name and bundle ID
+        run: |
+          cyan \
+            -i YouMod-original.ipa \
+            -o YouMod-Test_21.37.4_v2.0.0.ipa \
+            -n "YouMod Test" \
+            -b "com.jdtaylo90.youmodtest"
+
+      - name: Upload rebundled IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: YouMod-Test-IPA
+          path: YouMod-Test_21.37.4_v2.0.0.ipa
+          if-no-files-found: error
