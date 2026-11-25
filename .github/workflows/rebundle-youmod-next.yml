@@ -1,0 +1,103 @@
+name: Make YouMod Next IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      youtube_version:
+        description: "Prebuilt YouTube base (YouMod 2.0.0)"
+        type: choice
+        required: true
+        default: "21.39.4"
+        options:
+          - "21.39.4"
+          - "21.37.4"
+
+permissions:
+  contents: read
+
+jobs:
+  rebundle:
+    name: Rebundle stable YouMod for testing
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    env:
+      YT_VERSION: ${{ inputs.youtube_version }}
+      APP_NAME: "YouMod Next"
+      BUNDLE_ID: "com.jdtaylo90.youmodnext"
+
+    steps:
+      - name: Choose pinned source release
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$YT_VERSION" in
+            "21.39.4")
+              TAG="youmod-ipa22"
+              SHA="b0092ac9684521cc68169df3a18ad8744c8c9eb37321f478b00e5126503cd9e9"
+              ;;
+            "21.37.4")
+              TAG="youmod-ipa21"
+              SHA="b46839b3fcf1f01daf9118d7ca2620a24f4fc1e1069f3316915b77839e9f55ae"
+              ;;
+            *)
+              echo "::error::Unsupported source version"
+              exit 1
+              ;;
+          esac
+          echo "SOURCE_URL=https://github.com/shreybaviskar/Youtube-Premium-2.0-IPA/releases/download/$TAG/YouMod_${YT_VERSION}_v2.0.0.ipa" >> "$GITHUB_ENV"
+          echo "SOURCE_SHA=$SHA" >> "$GITHUB_ENV"
+
+      - name: Download and verify prebuilt IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 -o YouMod-original.ipa "$SOURCE_URL"
+          echo "$SOURCE_SHA  YouMod-original.ipa" | shasum -a 256 -c -
+          unzip -tqq YouMod-original.ipa
+
+      - name: Install cyan
+        shell: bash
+        run: |
+          set -euo pipefail
+          pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+
+      - name: Set a separate app identity (keep existing apps untouched)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cyan -i YouMod-original.ipa \
+               -o "YouMod-Next_${YT_VERSION}_v2.0.0.ipa" \
+               -n "$APP_NAME" \
+               -b "$BUNDLE_ID"
+
+      - name: Validate output IPA identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, plistlib, zipfile
+          name = f"YouMod-Next_{os.environ['YT_VERSION']}_v2.0.0.ipa"
+          with zipfile.ZipFile(name) as ipa:
+              plists = [p for p in ipa.namelist()
+                        if p.startswith("Payload/") and p.endswith(".app/Info.plist")
+                        and p.count("/") == 2]
+              assert len(plists) == 1, f"Unexpected primary app plist paths: {plists}"
+              info = plistlib.loads(ipa.read(plists[0]))
+              expected = os.environ['BUNDLE_ID']
+              actual = info.get('CFBundleIdentifier')
+              assert actual == expected, f"Bundle ID mismatch: {actual!r} != {expected!r}"
+              print(f"Verified app bundle ID: {actual}")
+              print(f"App display name: {info.get('CFBundleDisplayName', 'not set')}")
+              extensions = [p for p in ipa.namelist()
+                            if p.endswith(".appex/Info.plist")]
+              print(f"Bundled app extensions: {len(extensions)}")
+          PY
+
+      - name: Upload installable IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: YouMod-Next-${{ inputs.youtube_version }}-IPA
+          path: YouMod-Next_${{ inputs.youtube_version }}_v2.0.0.ipa
+          if-no-files-found: error
+          retention-days: 90
